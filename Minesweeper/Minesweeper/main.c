@@ -2,13 +2,17 @@
 #include<stdlib.h>
 #include<time.h>
 
+#include "resource.h"
+
 #pragma warning(disable:4996)
+#pragma warning(disable:4018) //All comparisons are safe enough for only range like 0<signed<unsigned and equality will be checked.
 
-//#define WIN_CONSOLE
+//#define CHAR_ONLY
 
-#ifndef WIN_CONSOLE
+#ifndef CHAR_ONLY
+#define PX_PER_CELL 16
 #include <Windows.h>
-#endif //WIN_CONSOLE
+#endif //CHAR_ONLY
 
 typedef enum CellState{
 	UNTOUCHED = 0, TOUCHED, FLAGGED, QUESTION
@@ -44,7 +48,7 @@ struct settings{
 	unsigned performance : 1;
 	unsigned boardwidth : 5;
 	unsigned boardheight : 5;
-	unsigned minenum : 5;
+	unsigned minenum : 8;
 }settings;
 
 /* Score related */
@@ -61,31 +65,47 @@ void lclick(int x, int y);/** To perform a left-click on the board. */
 void rclick(int x, int y);/** To perform a right-click on the board. */
 void bclick(int x, int y);/** To perform a both-left-and-right click. */
 void exec();/** To input and execute commands. */
-void pchar1(CellInfo c); void pchar(CellInfo c);/** To print the char to display. */
+#ifndef CHAR_ONLY
+	void ppic(int x, int y);
+#else
+	void pchar1(CellInfo c); void pchar(CellInfo c);/** To print the char to display. */
+#endif
 void print();/** To print current board. */
 void judge();/** To judge if the player has won. */
 
-int main(){
-#ifndef WIN_CONSOLE
-	HWND cmd = GetConsoleWindow();
-	HDC dc = GetDC(cmd);
-	HDC dc1 = CreateCompatibleDC(dc);
-	HBITMAP bitmap = (HBITMAP) LoadImage(GetModuleHandle(0), MAKEINTRESOURCE(103/*IDB_BITMAP2*/), IMAGE_BITMAP, 65, 65, LR_CREATEDIBSECTION);
+#ifndef CHAR_ONLY
+HWND cmd;
+HDC dc, dcb;
+HBITMAP bitmap;
 #endif
+
+int main(){
 	char c;
 	int num1, num2, num3;
+#ifndef CHAR_ONLY
+	cmd = GetConsoleWindow();
+	dc = GetDC(cmd);
+	dcb = CreateCompatibleDC(dc);
+	bitmap = (HBITMAP) LoadImage(GetModuleHandle(0), MAKEINTRESOURCE(IDB_BITMAP2), IMAGE_BITMAP, 65, 65, LR_CREATEDIBSECTION);
+	SelectObject(dcb, bitmap);
+#endif
 	init();
-	printf("Game start?(N/n for no, s for setup)\n");
+	printf("Game start?(N/n for no, S/s for setup)\n");
 	while(1){
 		scanf(" %c", &c);
 		if(c == 'N' || c == 'n')break;
-		if(c == 's'){
+		if(c == 'S' || c == 's'){
 			printf("Please input: width, height of the board and number of bombs.\n");
 			scanf("%d %d %d", &num1, &num2, &num3);
 			resize(num1, num2, num3);
-			printf("Please input: whether question mark should be displayed when an r-click happens on a flagged square.");
-			scanf("%d", &num1);
-			settings.flagmode = (num1 != 0);
+			printf("Please input: whether question mark should be displayed when an r-click happens on a flagged square.(y-Yes n-No default-Yes)");
+			scanf(" %c", &c);
+			settings.flagmode = !(c == 'N' || c == 'n');
+#ifdef CHAR_ONLY
+			printf("Please input: whether the board should be displayed with borders.(y-Yes n-No,simply characters default-Yes)");
+			scanf(" %c", &c);
+			settings.performance = !(c == 'N' || c == 'n');
+#endif
 		}
 		binit();
 		print();
@@ -95,6 +115,11 @@ int main(){
             print();
 		}
 	}
+#ifndef CHAR_ONLY
+	DeleteObject(bitmap);
+	DeleteDC(dcb);
+	ReleaseDC(cmd, dc);
+#endif
 	return 0;
 }
 
@@ -104,9 +129,7 @@ void init(){
 	settings.minenum = 10;
 	srand((unsigned)time(NULL));
 	settings.flagmode = settings.performance = 1;
-#ifdef WIN_CONSOLE
 	system("color 70");
-#endif
 }
 
 /** To resize the board. */
@@ -115,14 +138,15 @@ void resize(int w, int h, int b){
 		settings.boardwidth = w;
 		settings.boardheight = h;
 	} else {
-		printf("Invalid size!");
+		printf("Invalid size! No change will be done.");
 		return;
 	}
-	if(b == 0)return;
-	if(b > w * h / 8 && b < w * h / 4){
+	if(b == 0)b = settings.minenum;
+	if(b >= w && b >= h && b <= w * h / 4){
 		settings.minenum = b;
 	}  else {
-		printf("Invalid bomb number!");
+		printf("Invalid bomb number! Default(width*height/5) has been set.");
+		settings.minenum = w * h / 5;
 	}
 }
 
@@ -144,8 +168,8 @@ void mine(int x, int y){
 	laststart = time(NULL);
 	state = INIT;
 	for(n = 0; n < settings.minenum; ){
-		i = rand() % (settings.boardwidth - 1) + 1;
-		j = rand() % (settings.boardheight - 1) + 1;
+		i = rand() % settings.boardwidth + 1;
+		j = rand() % settings.boardheight + 1;
 		if(board[i][j].num == 9)continue;
 		if(i == x && j == y)continue;/* No mine should be in the first cell touched. */
 		board[i][j].num = 9;
@@ -195,7 +219,7 @@ void flag(int x, int y, int no_cancel){
 		break;
 	case FLAGGED:
 		if(no_cancel)break;
-		board[x][y].st = settings.flagmode ? UNTOUCHED : QUESTION;
+		board[x][y].st = settings.flagmode ? QUESTION : UNTOUCHED;
 		break;
     case QUESTION:
         board[x][y].st = UNTOUCHED;
@@ -281,11 +305,31 @@ void exec(){
 }
 
 /** To print current board. */
+#ifndef CHAR_ONLY
 void print(){
 	int i, j;
-#ifdef WIN_CONSOLE
 	system("cls");
-#endif
+	for(i = 1; i <= settings.boardheight; i++){
+		printf("\n");
+	}
+	for(i = 1; i <= settings.boardheight; i++){
+		for(j = 1; j <= settings.boardwidth; j++){
+			ppic(i,j);
+		}
+	}
+	if(state == WIN){
+        printf("\nYou made it!\nPlay again?(n for no, s for setup)\n");
+		printf("Time:%lf seconds.", difftime(laststart,time(NULL)));
+	}else if(state == LOSE){
+        printf("\nGame over!\nPlay again?(n for no, s for setup)\n");
+	}else{
+        printf("\nPlease input the next command:\n");
+	}
+}
+#else
+void print(){
+	int i, j;
+	system("cls");
 	if(settings.performance){
 		printf("┏");
 		for(j = 0; j < settings.boardwidth - 1; j++)
@@ -326,24 +370,88 @@ void print(){
     else
         printf("\nPlease input the next command:\n");
 }
+#endif
 
 /** To print the char to display. */
+#ifndef CHAR_ONLY
+#define DRAW(ix, iy) BitBlt(dc, (y-1)*PX_PER_CELL+1, (x-1)*PX_PER_CELL+1, PX_PER_CELL, PX_PER_CELL, dcb, ix*PX_PER_CELL + 1, iy*PX_PER_CELL + 1, SRCCOPY)
+void ppic(int x, int y){
+	switch(board[x][y].st){
+	case UNTOUCHED:
+		if(state >= LOSE && board[x][y].num == 9){
+			if(state == LOSE)DRAW(0, 2);
+			else DRAW(3, 2);
+        }else{
+			DRAW(0, 3);
+		}
+		break;
+	case FLAGGED:
+		if(state >= LOSE && board[x][y].num != 9){
+			DRAW(2, 2);
+		}else{
+			DRAW(3, 2);
+        }
+        break;
+	case QUESTION:
+		DRAW(3, 3);
+		break;
+	case TOUCHED:
+		switch(board[x][y].num){
+        case 0:
+			DRAW(2, 3);
+            break;
+        case 1:
+			DRAW(0, 0);
+            break;
+        case 2:
+			DRAW(1, 0);
+            break;
+        case 3:
+			DRAW(2, 0);
+            break;
+        case 4:
+			DRAW(3, 0);
+            break;
+        case 5:
+			DRAW(0, 1);
+            break;
+        case 6:
+			DRAW(1, 1);
+            break;
+		case 7:
+			DRAW(2, 1);
+            break;
+        case 8:
+			DRAW(3, 1);
+            break;
+        case 9:
+			DRAW(1, 2);
+			break;
+		}
+        break;
+	}
+}
+#else
 void pchar1(CellInfo c){
 	switch(c.st){
 	case UNTOUCHED:
 		if(state >= LOSE && c.num == 9){
-			printf("◎");
+			if(state == LOSE)printf("◎");
+			else printf("★");
         }else{
 			printf("　");
 		}
 		break;
 	case FLAGGED:
-		if(state >= LOSE && c.num != 9){
+		if(state == LOSE && c.num != 9){
             printf("Ｘ");
 		}else{
 			printf("★");
         }
         break;
+	case QUESTION:
+		printf("？");
+		break;
 	case TOUCHED:
 		switch(c.num){
         case 0:
@@ -378,17 +486,16 @@ void pchar1(CellInfo c){
 			break;
 		}
         break;
-    default:
-        printf("？");
 	}
 	return;
 }
 void pchar(CellInfo c){
 	switch(c.st){
 	case UNTOUCHED:
-		if(state >= LOSE && c.num == 9)
-			putchar('#');
-		else
+		if(state >= LOSE && c.num == 9){
+			if(state == LOSE)putchar('#');
+			else putchar('F');
+		}else
 			putchar('.');
         break;
 	case FLAGGED:
@@ -403,10 +510,12 @@ void pchar(CellInfo c){
 		else
 			putchar('*');
         break;
-    default:
+    case QUESTION:
         putchar('?');
+		break;
 	}
 }
+#endif
 
 void judge(){
     int i, j, n;
@@ -417,5 +526,12 @@ void judge(){
             if(board[i][j].st != TOUCHED)n++;
         }
     }
-    if(n == settings.minenum)state = WIN;
+    if(n == settings.minenum){
+		state = WIN;
+		for(i = 1; i <= settings.boardheight; i++){
+			for(j = 1; j <= settings.boardwidth; j++){
+				flag(i, j, 1);
+			}
+		}
+	}
 }
